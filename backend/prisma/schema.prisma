@@ -1,0 +1,233 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum BusinessSector {
+  GENERAL
+  TOURISM
+}
+
+enum FilingFrequency {
+  MONTHLY
+  QUARTERLY
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  PREPARER
+  REVIEWER
+  READ_ONLY
+}
+
+enum PurchaseStatus {
+  PROCESSING
+  NEEDS_REVIEW
+  APPROVED
+  FAILED
+}
+
+enum TaxPeriodStatus {
+  OPEN
+  REVIEW
+  FILED
+  REOPENED
+}
+
+model User {
+  id          String               @id @default(uuid()) @db.Uuid
+  name        String               @map("displayName")
+  email       String               @unique
+  emailVerified Boolean            @default(false)
+  image       String?
+  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime             @updatedAt @db.Timestamptz(3)
+  sessions    Session[]
+  accounts    Account[]
+  memberships BusinessMembership[]
+  auditEvents AuditEvent[]
+
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  expiresAt DateTime @db.Timestamptz(3)
+  token     String   @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  ipAddress String?
+  userAgent String?
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id @default(uuid()) @db.Uuid
+  accountId             String
+  providerId             String
+  userId                String    @db.Uuid
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime? @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @db.Timestamptz(3)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(uuid()) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([identifier])
+}
+
+model Business {
+  id             String               @id @default(uuid()) @db.Uuid
+  name           String
+  tin            String               @unique @db.VarChar(13)
+  sector         BusinessSector
+  filingFrequency FilingFrequency
+  address        String?
+  phone          String?
+  email          String?
+  createdAt      DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime             @updatedAt @db.Timestamptz(3)
+  memberships    BusinessMembership[]
+  taxPeriods     TaxPeriod[]
+  purchases      PurchaseInvoice[]
+  sales          Sale[]
+  auditEvents    AuditEvent[]
+}
+
+model BusinessMembership {
+  id         String     @id @default(uuid()) @db.Uuid
+  businessId String     @db.Uuid
+  userId     String     @db.Uuid
+  role       MemberRole @default(OWNER)
+  createdAt  DateTime   @default(now()) @db.Timestamptz(3)
+  business   Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([userId])
+}
+
+model TaxPeriod {
+  id              String          @id @default(uuid()) @db.Uuid
+  businessId      String          @db.Uuid
+  frequency       FilingFrequency
+  startsOn        DateTime        @db.Date
+  endsOn          DateTime        @db.Date
+  status          TaxPeriodStatus @default(OPEN)
+  filedAt         DateTime?       @db.Timestamptz(3)
+  filingReference String?
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @db.Timestamptz(3)
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@unique([businessId, startsOn, endsOn])
+  @@index([businessId, status, startsOn])
+}
+
+model PurchaseInvoice {
+  id             String         @id @default(uuid()) @db.Uuid
+  businessId     String         @db.Uuid
+  status         PurchaseStatus @default(PROCESSING)
+  // Provider-neutral private object key. Convex storage IDs are demo-only and are not imported.
+  documentKey    String?
+  fileName       String         @db.VarChar(200)
+  contentType    String         @db.VarChar(100)
+  extractionError String?
+  aiNotes        String?
+  supplierName   String?
+  supplierTin    String?        @db.VarChar(13)
+  invoiceNumber  String         @default("") @db.VarChar(120)
+  invoiceDate    DateTime?      @db.Date
+  currency       String         @default("MVR") @db.VarChar(3)
+  uploadedAt     DateTime       @default(now()) @db.Timestamptz(3)
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(3)
+  business       Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  taxLines       PurchaseTaxLine[]
+
+  @@index([businessId, status, invoiceDate])
+  @@index([businessId, invoiceNumber])
+  @@index([businessId, supplierTin, invoiceNumber])
+}
+
+model PurchaseTaxLine {
+  id                String          @id @default(uuid()) @db.Uuid
+  purchaseInvoiceId String          @db.Uuid
+  rate              Decimal         @db.Decimal(5, 2)
+  taxableAmount     Decimal         @db.Decimal(14, 2)
+  gstAmount         Decimal         @db.Decimal(14, 2)
+  invoice           PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseInvoiceId])
+}
+
+model Sale {
+  id             String      @id @default(uuid()) @db.Uuid
+  businessId     String      @db.Uuid
+  saleDate       DateTime    @db.Date
+  reference      String      @db.VarChar(120)
+  customerName   String?
+  customerTin    String?     @db.VarChar(13)
+  description    String?
+  zeroRatedAmount Decimal    @default(0) @db.Decimal(14, 2)
+  exemptAmount   Decimal     @default(0) @db.Decimal(14, 2)
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
+  business       Business    @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  taxLines       SaleTaxLine[]
+
+  @@index([businessId, saleDate])
+}
+
+model SaleTaxLine {
+  id            String   @id @default(uuid()) @db.Uuid
+  saleId        String   @db.Uuid
+  rate          Decimal  @db.Decimal(5, 2)
+  taxableAmount Decimal  @db.Decimal(14, 2)
+  gstAmount     Decimal  @db.Decimal(14, 2)
+  sale          Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId])
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  actorId    String?  @db.Uuid
+  actorName  String
+  action     String   @db.VarChar(80)
+  entity     String   @db.VarChar(80)
+  entityId   String?
+  summary    String   @db.VarChar(300)
+  changes    Json?
+  isSystem   Boolean  @default(false)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, createdAt])
+  @@index([businessId, entity, createdAt])
+}

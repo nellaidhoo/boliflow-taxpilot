@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh trusted Cloudflare IP ranges for Nginx
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/update-cloudflare-realip.py
